@@ -12,7 +12,8 @@ import Swal from "sweetalert2";
 import "react-toastify/dist/ReactToastify.css";
 
 const CountryHome = () => {
-    const [countries, setCountries] = useState([]);
+    const [allCountries, setAllCountries] = useState([]);
+    const [filteredCountries, setFilteredCountries] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [regionFilter, setRegionFilter] = useState("All");
     const [loading, setLoading] = useState(false);
@@ -25,9 +26,30 @@ const CountryHome = () => {
     const auth = getAuth();
 
     useEffect(() => {
-        fetchCountries();
+        fetchAllCountries();
         loadFavorites();
-    }, [regionFilter]);
+    }, []);
+
+    useEffect(() => {
+        // Apply both filters whenever searchTerm or regionFilter changes
+        let result = [...allCountries];
+        
+        // Apply region filter
+        if (regionFilter !== "All") {
+            result = result.filter(country => 
+                country.region.toLowerCase() === regionFilter.toLowerCase()
+            );
+        }
+        
+        // Apply search filter
+        if (searchTerm.trim()) {
+            result = result.filter(country =>
+                country.name.common.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+        }
+        
+        setFilteredCountries(result);
+    }, [searchTerm, regionFilter, allCountries]);
 
     useEffect(() => {
         const handleScroll = () => {
@@ -48,7 +70,7 @@ const CountryHome = () => {
         handleScroll();
 
         return () => window.removeEventListener('scroll', handleScroll);
-    }, [countries]);
+    }, [filteredCountries]);
 
     const loadFavorites = async () => {
         const user = auth.currentUser;
@@ -65,6 +87,19 @@ const CountryHome = () => {
         }
     };
 
+    const fetchAllCountries = async () => {
+        setLoading(true);
+        try {
+            const res = await axios.get("https://restcountries.com/v3.1/all");
+            setAllCountries(res.data);
+            setFilteredCountries(res.data);
+        } catch (err) {
+            console.error("Error fetching countries", err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const addToFavorites = async (country) => {
         const user = auth.currentUser;
         if (!user) {
@@ -76,7 +111,6 @@ const CountryHome = () => {
             setFavoriteLoading(true);
             const countryId = country.cca3;
             if (favorites.includes(countryId)) {
-                // Show SweetAlert confirmation to remove
                 const result = await Swal.fire({
                     title: `Remove ${country.name.common}?`,
                     text: "Do you want to remove this from favorites?",
@@ -128,43 +162,8 @@ const CountryHome = () => {
         window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
-    const fetchCountries = async () => {
-        setLoading(true);
-        let url = "https://restcountries.com/v3.1/all";
-        if (regionFilter !== "All") {
-            url = `https://restcountries.com/v3.1/region/${regionFilter.toLowerCase()}`;
-        }
-        try {
-            const res = await axios.get(url);
-            setCountries(res.data);
-        } catch (err) {
-            console.error("Error fetching countries", err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const searchCountries = async (name) => {
-        setLoading(true);
-        try {
-            const res = await axios.get(`https://restcountries.com/v3.1/name/${name}`);
-            setCountries(res.data);
-        } catch (err) {
-            console.error("Error searching country", err);
-            setCountries([]);
-        } finally {
-            setLoading(false);
-        }
-    };
-
     const handleSearchChange = (e) => {
-        const value = e.target.value;
-        setSearchTerm(value);
-        if (value.trim()) {
-            searchCountries(value);
-        } else {
-            fetchCountries();
-        }
+        setSearchTerm(e.target.value);
     };
 
     return (
@@ -204,8 +203,14 @@ const CountryHome = () => {
                     </div>
                 )}
 
+                {!loading && filteredCountries.length === 0 && (
+                    <div className="text-center py-5">
+                        <h4>No countries found matching your search</h4>
+                    </div>
+                )}
+
                 <div className="row row-cols-1 row-cols-md-3 g-4">
-                    {countries.map((country, index) => (
+                    {filteredCountries.map((country, index) => (
                         <div
                             className="col"
                             key={country.cca3}
