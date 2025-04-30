@@ -21,7 +21,7 @@ const FavoritesPage = () => {
         const fetchFavoriteCountries = async () => {
             const user = auth.currentUser;
             if (!user) {
-                navigate("/login");
+                navigate("/");
                 return;
             }
 
