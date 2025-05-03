@@ -1,10 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "./firebase";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "./firebase";
 import "../styles/Login.css";
-import CryptoJS from "crypto-js";
 import Swal from "sweetalert2";
 
 const Login = () => {
@@ -13,14 +12,6 @@ const Login = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-
-  const verifyPassword = (enteredPassword, storedHash, storedSalt, iterations, keySize) => {
-    const hashedPassword = CryptoJS.PBKDF2(enteredPassword, storedSalt, {
-      keySize: keySize/32,
-      iterations: iterations
-    }).toString();
-    return hashedPassword === storedHash;
-  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -33,85 +24,35 @@ const Login = () => {
 
     try {
       setLoading(true);
+      await signInWithEmailAndPassword(auth, email, password);
       
-      // Query Firestore for user
-      const usersRef = collection(db, "users");
-      const q = query(usersRef, where("email", "==", email.toLowerCase().trim()));
-      const querySnapshot = await getDocs(q);
-
-      if (querySnapshot.empty) {
-        throw new Error("No account found with this email");
-      }
-
-      // Get user data
-      const userDoc = querySnapshot.docs[0];
-      const userData = userDoc.data();
-      
-      // Verify password
-      const isPasswordValid = verifyPassword(
-        password,
-        userData.password.hash,
-        userData.password.salt,
-        userData.password.iterations,
-        userData.password.keySize
-      );
-
-      if (!isPasswordValid) {
-        throw new Error("Incorrect password");
-      }
-
-      // Create comprehensive session object
-      const sessionData = {
-        isAuthenticated: true,
-        userId: userDoc.id,
-        email: userData.email,
-        name: userData.name,
-        lastLogin: new Date().toISOString(),
-        // Add any additional user data you want to store
-        profileComplete: userData.profileComplete || false,
-        favorites: userData.favorites || [],
-        createdAt: userData.createdAt || null
-      };
-
-      // Save to localStorage with encryption
-      const encryptedSession = CryptoJS.AES.encrypt(
-        JSON.stringify(sessionData),
-        process.env.REACT_APP_LOCALSTORAGE_KEY || "default-secret-key"
-      ).toString();
-      
-      localStorage.setItem("userSession", encryptedSession);
-      
-      // Show success message
       await Swal.fire({
         title: "Login Successful!",
-        text: `Welcome back, ${userData.name || userData.email}`,
         icon: "success",
         timer: 2000,
         showConfirmButton: false
       });
       
-      // Redirect to home
       navigate("/home");
+    } catch (error) {
+      let errorMessage = "Login failed. Please try again.";
       
-    } catch (err) {
-      let errorMessage = "Failed to login. Please try again.";
-      
-      switch (err.message) {
-        case "No account found with this email":
+      switch (error.code) {
+        case "auth/invalid-email":
+          errorMessage = "Invalid email address";
+          break;
+        case "auth/user-not-found":
           errorMessage = "No account found with this email";
           break;
-        case "Incorrect password":
+        case "auth/wrong-password":
           errorMessage = "Incorrect password";
+          break;
+        case "auth/too-many-requests":
+          errorMessage = "Account temporarily locked due to many failed attempts";
           break;
       }
 
       setError(errorMessage);
-      await Swal.fire({
-        title: "Login Failed",
-        text: errorMessage,
-        icon: "error",
-        confirmButtonText: "Try Again"
-      });
     } finally {
       setLoading(false);
     }
