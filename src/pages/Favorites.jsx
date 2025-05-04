@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { FaTrash, FaSignOutAlt } from "react-icons/fa";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { getAuth } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
 import { toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { useNavigate } from "react-router-dom";
@@ -14,48 +14,54 @@ const FavoritesPage = () => {
     const [favoriteCountries, setFavoriteCountries] = useState([]);
     const [loading, setLoading] = useState(true);
     const [darkMode, setDarkMode] = useState(false);
+    const [user, setUser] = useState(null);
     const auth = getAuth();
     const navigate = useNavigate();
 
     useEffect(() => {
-        const fetchFavoriteCountries = async () => {
-            const user = auth.currentUser;
-            if (!user) {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            if (user) {
+                setUser(user);
+                fetchFavoriteCountries(user);
+            } else {
                 navigate("/");
-                return;
             }
+        });
 
-            try {
-                const docRef = doc(db, "userFavorites", user.uid);
-                const docSnap = await getDoc(docRef);
+        return () => unsubscribe();
+    }, [auth, navigate]);
+
+    const fetchFavoriteCountries = async (user) => {
+        try {
+            const docRef = doc(db, "userFavorites", user.uid);
+            const docSnap = await getDoc(docRef);
+            
+            if (docSnap.exists() && docSnap.data().favorites?.length > 0) {
+                const favoriteIds = docSnap.data().favorites;
                 
-                if (docSnap.exists() && docSnap.data().favorites?.length > 0) {
-                    const favoriteIds = docSnap.data().favorites;
-                    
-                    const responses = await Promise.all(
-                        favoriteIds.map(id => 
-                            axios.get(`https://restcountries.com/v3.1/alpha/${id}`)
-                                .then(res => res.data[0])
-                                .catch(() => null)
-                        )
-                    );
-                    
-                    const validCountries = responses.filter(country => country !== null);
-                    setFavoriteCountries(validCountries);
-                }
-            } catch (error) {
-                console.error("Error fetching favorites:", error);
-                toast.error("Failed to load favorites");
-            } finally {
-                setLoading(false);
+                const responses = await Promise.all(
+                    favoriteIds.map(id => 
+                        axios.get(`https://restcountries.com/v3.1/alpha/${id}`)
+                            .then(res => res.data[0])
+                            .catch(() => null)
+                    )
+                );
+                
+                const validCountries = responses.filter(country => country !== null);
+                setFavoriteCountries(validCountries);
+            } else {
+                setFavoriteCountries([]);
             }
-        };
+        } catch (error) {
+            console.error("Error fetching favorites:", error);
+            toast.error("Failed to load favorites");
+        } finally {
+            setLoading(false);
+        }
+    };
 
-        fetchFavoriteCountries();
-    }, [auth.currentUser, navigate]);
-
-    const handleLogout = () => {
-        Swal.fire({
+    const handleLogout = async () => {
+        const result = await Swal.fire({
             title: 'Are you sure?',
             text: "You will be logged out of your account",
             icon: 'warning',
@@ -63,16 +69,23 @@ const FavoritesPage = () => {
             confirmButtonColor: '#3085d6',
             cancelButtonColor: '#d33',
             confirmButtonText: 'Yes, logout!'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                localStorage.removeItem('userSession');
+        });
+
+        if (result.isConfirmed) {
+            try {
+                await signOut(auth);
                 navigate('/');
                 toast.success('Logged out successfully');
+            } catch (error) {
+                console.error("Logout error:", error);
+                toast.error("Failed to logout");
             }
-        });
+        }
     };
 
     const removeFromFavorites = async (countryId, countryName) => {
+        if (!user) return;
+
         const result = await Swal.fire({
             title: `Remove ${countryName}?`,
             text: "This will remove the country from your favorites",
@@ -84,9 +97,6 @@ const FavoritesPage = () => {
         });
 
         if (result.isConfirmed) {
-            const user = auth.currentUser;
-            if (!user) return;
-
             try {
                 const docRef = doc(db, "userFavorites", user.uid);
                 const docSnap = await getDoc(docRef);
@@ -99,7 +109,7 @@ const FavoritesPage = () => {
                         favorites: updatedFavorites,
                         lastUpdated: new Date(),
                         userEmail: user.email
-                    });
+                    }, { merge: true });
 
                     setFavoriteCountries(prev => prev.filter(country => country.cca3 !== countryId));
                     toast.success(`${countryName} removed from favorites`);
