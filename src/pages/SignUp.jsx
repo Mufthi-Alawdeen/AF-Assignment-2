@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "./firebase";
+import { collection, addDoc, serverTimestamp, setDoc, doc } from "firebase/firestore";
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { auth, db } from "./firebase";
 import "../styles/Login.css";
-import CryptoJS from "crypto-js";
+import Swal from "sweetalert2";
 
 const SignUp = () => {
   const [name, setName] = useState("");
@@ -15,67 +16,69 @@ const SignUp = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  // Generate a secure salt and hash the password
-  const hashPassword = (password) => {
-    const salt = CryptoJS.lib.WordArray.random(128/8).toString();
-    const iterations = 10000;
-    const keySize = 256;
-    const hashedPassword = CryptoJS.PBKDF2(password, salt, {
-      keySize: keySize/32,
-      iterations: iterations
-    }).toString();
-    
-    return {
-      salt: salt,
-      hash: hashedPassword,
-      iterations: iterations,
-      keySize: keySize
-    };
-  };
-
   const handleSignUp = async (e) => {
     e.preventDefault();
     setError("");
-
-    // Validation
-    if (password !== confirmPassword) {
-      setError("Passwords don't match");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
-
+    setLoading(true);
+  
     try {
-      setLoading(true);
+      // 1. Input validation
+      if (password !== confirmPassword) {
+        throw new Error("Passwords don't match");
+      }
+      if (password.length < 8) {
+        throw new Error("Password must be at least 8 characters");
+      }
+  
+      // 2. Create auth user
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       
-      // Hash the password with salt
-      const { salt, hash, iterations, keySize } = hashPassword(password);
-      
-      // Store user data in Firestore
-      await addDoc(collection(db, "users"), {
+      // 3. Create Firestore document with the same ID as auth UID
+      await setDoc(doc(db, "users", userCredential.user.uid), {
         name: name,
         email: email.toLowerCase().trim(),
-        password: {
-          hash: hash,
-          salt: salt,
-          iterations: iterations,
-          keySize: keySize
-        },
         createdAt: serverTimestamp(),
         lastUpdated: serverTimestamp()
       });
-
+  
+      // 4. Create empty favorites collection
+      await setDoc(doc(db, "userFavorites", userCredential.user.uid), {
+        favorites: [],
+        lastUpdated: serverTimestamp()
+      });
+  
+      // 5. Success handling
+      await Swal.fire({
+        title: "Welcome!",
+        text: "Account created successfully",
+        icon: "success",
+        timer: 2000
+      });
+  
+      // 6. Redirect
       navigate("/");
+  
+    } catch (error) {
+      console.error("Signup error:", error);
       
-    } catch (err) {
-      if (err.code === "permission-denied") {
-        setError("Database write failed. Please contact support.");
-      } else {
-        setError("Failed to create account. Please try again.");
+      let userFriendlyError = "Signup failed. Please try again.";
+      
+      if (error.code === "auth/email-already-in-use") {
+        userFriendlyError = "This email is already registered";
+      } else if (error.code === "auth/weak-password") {
+        userFriendlyError = "Password should be at least 6 characters";
+      } else if (error.message.includes("permission")) {
+        userFriendlyError = "Account created but setup failed. Please login.";
+      } else if (error.message) {
+        userFriendlyError = error.message;
       }
-      console.error("Signup error:", err);
+  
+      setError(userFriendlyError);
+      await Swal.fire({
+        title: "Oops!",
+        text: userFriendlyError,
+        icon: "error"
+      });
     } finally {
       setLoading(false);
     }
@@ -86,6 +89,7 @@ const SignUp = () => {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
         className="login-card"
       >
         <div className="login-header">
@@ -93,7 +97,15 @@ const SignUp = () => {
           <p>Join us today!</p>
         </div>
 
-        {error && <div className="error-message">{error}</div>}
+        {error && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="error-message"
+          >
+            {error}
+          </motion.div>
+        )}
 
         <form onSubmit={handleSignUp} className="login-form">
           <div className="form-group">
@@ -152,7 +164,8 @@ const SignUp = () => {
           >
             {loading ? (
               <>
-                <span className="spinner"></span> Creating account...
+                <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                Creating account...
               </>
             ) : (
               "Sign Up"
@@ -163,7 +176,7 @@ const SignUp = () => {
         <div className="signup-link">
           Already have an account?{" "}
           <button 
-            onClick={() => navigate("/login")}
+            onClick={() => navigate("/")}
             className="text-link"
           >
             Login
