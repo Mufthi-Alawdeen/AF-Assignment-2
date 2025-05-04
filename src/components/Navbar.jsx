@@ -2,9 +2,19 @@ import React from 'react';
 import { FaHeart, FaSignOutAlt } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
+import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from '../pages/firebase';
 
 export default function Navbar() {
     const navigate = useNavigate();
+    const [user, setUser] = React.useState(null);
+
+    React.useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            setUser(user);
+        });
+        return () => unsubscribe();
+    }, []);
 
     const handleLogout = () => {
         Swal.fire({
@@ -15,22 +25,25 @@ export default function Navbar() {
             confirmButtonColor: '#3085d6',
             cancelButtonColor: '#d33',
             confirmButtonText: 'Yes, logout!'
-        }).then((result) => {
+        }).then(async (result) => {
             if (result.isConfirmed) {
-                localStorage.removeItem('userSession');
-                navigate('/');
-                Swal.fire(
-                    'Logged out!',
-                    'You have been successfully logged out.',
-                    'success'
-                );
+                try {
+                    await signOut(auth);
+                    navigate('/');
+                    Swal.fire(
+                        'Logged out!',
+                        'You have been successfully logged out.',
+                        'success'
+                    );
+                } catch (error) {
+                    console.error("Logout error:", error);
+                }
             }
         });
     };
-
+    
     const handleFavoritesClick = () => {
-        const userSession = localStorage.getItem('userSession');
-        if (!userSession) {
+        if (!user) {
             Swal.fire({
                 title: 'Login Required',
                 text: 'Please login to view your favorites',
@@ -38,7 +51,7 @@ export default function Navbar() {
                 confirmButtonText: 'Go to Login'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    navigate('/login');
+                    navigate('/');
                 }
             });
             return;
@@ -52,12 +65,10 @@ export default function Navbar() {
             style={{ backgroundColor: '#fff' }}
         >
             <div className="container-fluid">
-                {/* Centered title - absolute positioning */}
                 <a className="navbar-brand fw-bold fs-4 text-dark position-absolute start-50 translate-middle-x" href="#">
                     Country Flags Explorer
                 </a>
                 
-                {/* Right-aligned buttons - pushed to end */}
                 <div className="d-flex ms-auto">
                     <button 
                         className="btn btn-outline-danger me-2"
@@ -65,12 +76,14 @@ export default function Navbar() {
                     >
                         <FaHeart /> Favorites
                     </button>
-                    <button 
-                        className="btn btn-outline-secondary"
-                        onClick={handleLogout}
-                    >
-                        <FaSignOutAlt /> Logout
-                    </button>
+                    {user && (
+                        <button 
+                            className="btn btn-outline-secondary"
+                            onClick={handleLogout}
+                        >
+                            <FaSignOutAlt /> Logout
+                        </button>
+                    )}
                 </div>
             </div>
         </nav>
